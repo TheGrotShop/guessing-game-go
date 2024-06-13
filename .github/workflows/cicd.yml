@@ -1,0 +1,107 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.cff'
+
+  pull_request:
+    branches:
+      - '**'
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.cff'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  get-go-versions:
+    name: Get Go Versions
+    runs-on: ubuntu-latest
+    outputs:
+      version-matrix: ${{ steps.get-language-versions.outputs.latest-versions }}
+
+    steps:
+      - name: Get Required Versions
+        uses: ActionsToolbox/get-language-versions-action@446919617fd774095b5dd3ed71c39dd3fd0d8f4f  # v0.1.3
+        id: get-language-versions
+        with:
+          language: "go"
+          remove-patch-version: true
+          max-versions: 3
+
+  go-build:
+    name: Build Go Code
+    needs: get-go-versions
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        go-versions: ${{ fromJson(needs.get-go-versions.outputs.version-matrix) }}
+
+    steps:
+      - name: Checkout the Repository
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.6
+
+      - name: Set up Go
+        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7  # v5.0.1
+        with:
+          go-version: ${{ matrix.go-versions }}
+
+      - name: Check code formatting
+        run: |
+          gofmt -l .
+          FILES=$(gofmt -l .)
+          if [ -n "$FILES" ]; then
+            echo "The following files are not formatted correctly:"
+            echo "$FILES"
+            exit 1
+          fi
+
+      - name: Run Go Vet
+        run: go vet ./..
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.50.1
+  
+      - name: Run golangci-lint
+        run: golangci-lint run ./src
+
+      - name: Run Go Build
+        run: go build -v ./src
+
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the Repository
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.6
+
+      - name: Perform ShellCheck Analysis
+        run: bash <(curl -s https://raw.githubusercontent.com/CICDToolbox/shellcheck/master/pipeline.sh)
+
+  cicd-pipeline:
+    if: always()
+    name: CI/CD Pipeline
+    needs:
+      - go-build
+      - shellcheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the Repository
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.6
+
+      - name: Check Job Statuses
+        run: .github/scripts/check-jobs.sh '${{ toJson(needs) }}'

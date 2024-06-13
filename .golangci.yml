@@ -1,0 +1,13 @@
+run:
+  skip-dirs:
+    - vendor
+    - other_unwanted_paths
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
